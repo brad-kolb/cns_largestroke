@@ -1,0 +1,650 @@
+---
+title: CNS submission
+author: Bradley Kolb
+date: "`r Sys.Date()`"
+output: 
+  github_document:
+    toc: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Packages
+library(tidyverse)
+library(rethinking)
+library(ellipse)
+
+#  Large core ----------
+independent_large_informed <- here::here("data/independent_large_informed.rds")
+independent_large_regular <- here::here("data/independent_large_regular.rds")
+independent_large_nopooling <- here::here("data/independent_large_nopooling.rds")
+independent_large_pooled <- here::here("data/independent_large_pooled.rds")
+#===============================================================================
+independent_large_informed <- read_rds(independent_large_informed)
+independent_large_regular <- read_rds(independent_large_regular)
+independent_large_nopooling <- read_rds(independent_large_nopooling)
+independent_large_pooled <- read_rds(independent_large_pooled)
+
+# Hermes -----------
+independent_hermes_informed <- here::here("data/independent_hermes_informed.rds")
+independent_hermes_nopooling <- here::here("data/independent_hermes_nopooling.rds")
+#===============================================================================
+independent_hermes_informed <- read_rds(independent_hermes_informed)
+independent_hermes_nopooling <- read_rds(independent_hermes_nopooling)
+```
+
+```{r functions}
+
+# function to calculate posterior median and intervals, for use in forestplot -----
+
+# Define a helper function to create a data frame for a single group
+create_df_single <- function(X, Y) {
+  # Calculate quantiles
+  q2.5 <- HPDI(X,prob=.95)[[1]]
+  q97.5 <- HPDI(X,prob=.95)[[2]]
+  
+  # Create a data frame with one row and the required columns
+  df <- tibble(
+    group = Y,
+    mean = round(mean(X),2),
+    median = round(median(X),2),
+    `2.5%` = q2.5,
+    `97.5%` = q97.5
+  )
+  
+  # Return the data frame
+  return(df)
+}
+
+# Define the main function that takes a list of vectors and a vector of strings
+create_df <- function(L, S) {
+  # Iterate over L and S, applying the create_df_single function to each pair and combining the results
+  result_df <- map2_dfr(L, S, create_df_single)
+  
+  # Return the combined data frame
+  return(result_df)
+}
+
+# Example usage
+L <- list(c(1, 2, 3, 4, 5), c(6, 7, 8, 9, 10))
+S <- c("Group1", "Group2")
+
+precis_df <- create_df(L, S)
+print(precis_df)
+```
+
+```{r posterior samples}
+set.seed(734)
+
+# Large core --------------------
+post_independent_large_informed <- extract.samples(independent_large_informed)
+post_independent_large_nopooling <- extract.samples(independent_large_nopooling)
+
+# Hermes -------------------
+post_independent_hermes_informed <- extract.samples(independent_hermes_informed)
+post_independent_hermes_nopooling <- extract.samples(independent_hermes_nopooling)
+```
+
+
+```{r posterior means}
+# Large core ------------------
+beta_angel <- post_independent_large_informed$b[,1]
+beta_rescue <- post_independent_large_informed$b[,2]
+beta_select <- post_independent_large_informed$b[,3]
+beta_large_hyper <- as.vector(post_independent_large_informed$bbar)
+
+tau_angel <- post_independent_large_informed$b[,1]
+tau_rescue <- post_independent_large_informed$b[,2]
+tau_select <- post_independent_large_informed$b[,3]
+tau_large_hyper <- as.vector(post_independent_large_informed$bbar)
+
+# Hermes --------------
+beta_escape <- post_independent_hermes_informed$b[,1]
+beta_extend <- post_independent_hermes_informed$b[,2]
+beta_mrclean <- post_independent_hermes_informed$b[,3]
+beta_revascat <- post_independent_hermes_informed$b[,4]
+beta_swift <- post_independent_hermes_informed$b[,5]
+beta_hermes_hyper <- as.vector(post_independent_hermes_informed$bbar)
+
+```
+
+```{r posterior SDs}
+# large ----------
+tau_large_hyper <- as.vector(post_independent_large_informed$tau)
+
+# hermes ------------
+tau_hermes_hyper <- as.vector(post_independent_hermes_informed$tau)
+
+```
+
+
+```{r precis tables for parameters using HPDI}
+
+# Large core ---------------
+# alpha
+L <- with(post_independent_large_informed,
+          list(a[,1],a[,2],a[,3],as.vector(abar),as.vector(sigma))
+)
+S <- c('ANGEL', 'RESCUE', 'SELECT2','Overall', 'sigma')
+trials_large_alpha <- create_df(L, S)
+
+# beta
+L <- with(post_independent_large_informed,
+          list(b[,1],b[,2],b[,3],as.vector(bbar), as.vector(tau))
+)
+S <- c('ANGEL', 'RESCUE', 'SELECT2','Overall', 'tau')
+trials_large_beta <- create_df(L, S)
+
+# Hermes ----------------
+
+# alpha
+L <- with(post_independent_hermes_informed,
+          list(a[,1],a[,2],a[,3],a[,4],a[,5],as.vector(abar),
+               as.vector(sigma))
+)
+S <- c('ESCAPE', 'EXTEND', 'MRCLEAN', 'REVASCAT', 'SWIFT','Overall','sigma')
+trials_hermes_alpha <- create_df(L, S)
+
+# beta
+L <- with(post_independent_hermes_informed,
+          list(b[,1],b[,2],b[,3],b[,4],b[,5],as.vector(bbar), 
+               as.vector(tau))
+)
+S <- c('ESCAPE', 'EXTEND', 'MRCLEAN', 'REVASCAT', 'SWIFT','Overall','tau')
+trials_hermes_beta <- create_df(L, S)
+```
+
+
+```{r Figure 1}
+# forest plots
+
+library(forestplot)
+
+# Large core ------------
+
+base_data <- tibble::tibble(mean  = c(1.16,0.74,1.01),
+                            lower = c(0.71,0.00,0.48),
+                            upper = c(1.63,1.38,1.55),
+                            study = c('ANGEL','RESCUE','SELECT2'),
+                            OR = c('1.16','0.74','1.01'),
+                            PI = c('(0.71, 1.63)','(0.00, 1.38)','(0.48, 1.55)'))
+
+base_data %>% 
+  forestplot(labeltext = c(study, OR, PI), 
+             title = 'Large strokes',
+             xlab = 'log OR',
+             clip = c(-.5, 1.5),
+             xlog = FALSE) %>% 
+  fp_set_style(box = "black",
+               line = "black",
+               summary = "black") %>%  
+  fp_add_header(study = c("Study"),
+                OR = c("Mean"),
+                PI = c("95% HPDI")) %>% 
+  fp_append_row(mean  = 0.85,
+                lower = 0.07,
+                upper = 1.54,
+                study = "Overall estimate",
+                OR = "0.85",
+                PI = "(0.07, 1.54)",
+                is.summary = TRUE) %>%  
+  fp_set_zebra_style("#EFEFEF")
+
+# Hermes ----------------
+
+base_data <- tibble::tibble(mean  = c(0.95,1.04,0.75,0.80,0.97),
+                            lower = c(0.59,0.48,0.38,0.40,0.57),
+                            upper = c(1.31,1.72,1.10,1.21,1.42),
+                            study = c('ESCAPE','EXTEND','MRCLEAN','REVASCAT','SWIFT'),
+                            OR = c('0.95','1.04','0.75','0.80','0.97'),
+                            PI = c('(0.59, 1.31)',
+                                   '(0.48, 1.72)',
+                                   '(0.38, 1.10)',
+                                   '(0.40, 1.21)',
+                                   '(0.57, 1.42)'))
+
+base_data %>% 
+  forestplot(labeltext = c(study, OR, PI), 
+             title = 'Small/Medium strokes',
+             xlab = 'log OR',
+             clip = c(-.5, 1.5), 
+             xlog = FALSE) %>% 
+  fp_set_style(box = "black",
+               line = "black",
+               summary = "black") %>%  
+  fp_add_header(study = c("Study"),
+                OR = c("Mean"),
+                PI = c("95% HPDI")) %>% 
+  fp_append_row(mean  = 0.85,
+                lower = 0.45,
+                upper = 1.26,
+                study = "Overall estimate",
+                OR = "0.85",
+                PI = "(0.45, 1.26)",
+                is.summary = TRUE) %>%  
+  fp_set_zebra_style("#EFEFEF")
+```
+
+```{r Figure 2}
+
+# marginal distributions for parameters
+set.seed(734)
+
+# relative treatment effect, log odds
+dens(rnorm(1e5,0,.75),lwd=3,lty=2,bty='n',
+     ylim=c(0,2.75),
+     col=col.alpha(1,0.5),
+     xlab='mean relative treatment effect (log OR)')
+dens(logor_large_hyper,col=2,lwd=3,bty='n',show.zero=TRUE,add=TRUE)
+ dens(logor_hermes_hyper,col=4,lwd=3,add=TRUE)
+legend("topright", 
+       legend=c("Large","Small/Medium", 'Prior'), col=c(2,4,col.alpha(1,.5)), pt.cex=2, pch=15,bty='n')
+
+# log odds control
+dens(rnorm(1e5,-2,.5),
+     lwd=3,
+     lty=2,
+     bty='n',
+     ylim=c(0,2.75),
+     xlim=c(-3,1),
+     col=col.alpha(2,0.5),
+     show.zero=TRUE,
+     xlab='mean log-odds of outcome in control')
+dens(rnorm(1e5,-1,.5),
+     lwd=3,
+     lty=2,
+     col=col.alpha(4,0.5),
+     add=TRUE
+)
+dens(post_independent_large_informed$abar,
+     col=2,
+     lwd=3,
+     add=TRUE)
+ dens(post_independent_hermes_informed$abar,
+      col=4,
+      lwd=3,
+      add=TRUE)
+legend("topright", 
+       legend=c("Large","Small/Medium", 'Large prior',
+                'Small/Medium prior'), col=c(2,4,col.alpha(2,.5), col.alpha(4,.5)), pt.cex=2, pch=15,bty='n')
+
+# sd
+dens(post_independent_hermes_informed$sigma,lwd=3,bty='n',
+     ylim=c(0,2.5),
+     col=4,
+     xlab='standard deviation in log-odds of outcome in control')
+dens(post_independent_large_informed$sigma,lwd=3,
+     col=2,
+     add=TRUE)
+dens(rexp(1e5,1),lwd=3,lty=2,
+     col=col.alpha(1,0.5),
+     add=TRUE)
+legend("topright", 
+       legend=c("Large","Small/Medium", 'Prior'), col=c(2,4,col.alpha(1,.5)), pt.cex=2, pch=15,bty='n')
+
+dens(sd_hermes_hyper,lwd=3,bty='n',
+     xlim=c(0,2),
+     ylim=c(0,2.5),
+     col=4,
+     xlab='standard deviation of relative treatment effect')
+dens(sd_large_hyper,lwd=3,
+     col=2,
+     add=TRUE)
+dens(rexp(1e5,1),lwd=3,lty=2,
+     col=col.alpha(1,0.5),
+     add=TRUE)
+legend("topright", 
+       legend=c("Large","Small/Medium", 'Prior'), col=c(2,4,col.alpha(1,.5)), pt.cex=2, pch=15,bty='n')
+```
+
+```{r Figure 3a and 3b}
+set.seed(616)
+# inferred population outcomes across trials
+# show the first 50 populations in the posterior
+
+# log odds success for control, individual gaussians
+plot(NULL, xlim=c(-3,0.5),ylim=c(0,2),
+     xlab = 'log-odds mRS 0-2', 
+     ylab = 'Density',bty='n')
+curve(dnorm(x,
+            mean(post_independent_large_informed$abar),
+            mean(post_independent_large_informed$sigma)),
+      col=2,
+      lwd=3,
+      add=TRUE)
+curve(dnorm(x,
+            mean(post_independent_hermes_informed$abar),
+            mean(post_independent_hermes_informed$sigma)),
+      col=4,
+      lwd=3,
+      add=TRUE)
+for (i in 1:50) {
+  with(post_independent_large_informed,
+       curve(dnorm(x,abar[i],sigma[i]),add=TRUE,
+             col=col.alpha(2,0.2))
+  )
+}
+for (i in 1:50) {
+  with(post_independent_hermes_informed,
+       curve(dnorm(x,abar[i],sigma[i]),add=TRUE,
+             col=col.alpha(4,0.2))
+  )
+}
+
+
+
+# log odds treatment effect
+plot(NULL, xlim=c(-1,2),ylim=c(0,2),
+     xlab = 'relative treatment effect (log OR)', 
+     ylab = 'Density',bty='n')
+curve(dnorm(x,
+            mean(post_independent_large_informed$bbar),
+            mean(post_independent_large_informed$tau)),
+      col=2,
+      lwd=3,
+      add=TRUE)
+curve(dnorm(x,
+            mean(post_independent_hermes_informed$bbar),
+            mean(post_independent_hermes_informed$tau)),
+      col=4,
+      lwd=3,
+      add=TRUE)
+for (i in 1:50) {
+  with(post_independent_large_informed,
+       curve(dnorm(x,bbar[i],tau[i]),add=TRUE,
+             col=col.alpha(2,0.2))
+  )
+}
+for (i in 1:50) {
+  with(post_independent_hermes_informed,
+       curve(dnorm(x,bbar[i],tau[i]),add=TRUE,
+             col=col.alpha(4,0.2))
+  )
+}
+
+# figure 3a ---------------------
+# sample 10k imaginary trials from the posterior distribution 
+
+set.seed(734)
+
+# Large core
+sim_trials_control_large <- with(post_independent_large_informed,
+                           rnorm(8e3,abar,sigma))
+
+sim_trials_treatment_large <- sim_trials_control_large +
+  with(post_independent_large_informed,
+       rnorm(8e3,bbar,tau))
+
+# Hermes
+sim_trials_control_hermes <- with(post_independent_hermes_informed,
+                           rnorm(8e3,abar,sigma))
+
+sim_trials_treatment_hermes <- sim_trials_control_hermes +
+  with(post_independent_hermes_informed,
+       rnorm(8e3,bbar,tau))
+
+dens(inv_logit(sim_trials_control_large),
+     col=col.alpha(2,0.5),
+     lwd=3,
+     bty='n',
+     xlab='Probability mRS 0-2')
+dens(inv_logit(sim_trials_treatment_large),
+     col=2,
+     lwd=5,
+     add=TRUE)
+dens(inv_logit(sim_trials_control_hermes),
+     col=col.alpha(4,0.5),
+     lwd=3,
+     add=TRUE)
+dens(inv_logit(sim_trials_treatment_hermes),
+     col=4,
+     lwd=5,
+     add=TRUE)
+legend("topright", 
+       legend=c("Large","Small/Medium"), col=c(2,4), pt.cex=2, pch=15,bty='n')
+
+
+# figure 3b -----------------
+library(ellipse)
+
+# large core
+logodds_c <- sim_trials_control_large
+logodds_t <- sim_trials_treatment_large
+
+plot( NULL , xlab="Probability mRS 0-2 (control)" , ylab="Probability mRS 0-2 (treatment)" , 
+      bty='n',xlim=c(0,.9), ylim=c(0,.9))
+abline(0,1,col=col.alpha(1,0.2),lty=2)
+
+SIGMA <- cov(cbind(logodds_c, logodds_t))
+MU <- c(mean(logodds_c), mean(logodds_t))
+# el <- ellipse( SIGMA , centre=MU , level=0.2)
+# lines(inv_logit(el) , col=col.alpha(2,0.2) , lwd=2 )
+# polygon( inv_logit(el) , col=col.alpha(2,0.2) , border=NA )
+el <- ellipse( SIGMA , centre=MU , level=0.3 )
+lines( inv_logit(el) , col=col.alpha(2,0.2) , lwd=2 )
+polygon( inv_logit(el) , col=col.alpha(2,0.2) , border=NA )
+el <- ellipse( SIGMA , centre=MU , level=0.89 )
+lines(inv_logit(el) , col=col.alpha(2,0.2) , lwd=2 )
+polygon(inv_logit(el) , col=col.alpha(2,0.2) , border=NA )
+
+points( mean(inv_logit(logodds_c)) , mean(inv_logit(logodds_t)), lwd=6 , col="white")
+points( mean(inv_logit(logodds_c)) , mean(inv_logit(logodds_t)) , lwd=3 , col=col.alpha(2,0.5))
+#points(8/102,14/100,lwd=6,col='white')
+points(8/102,14/100,lwd=1,col=2,pch=20)
+#points(26/225,69/230,lwd=6,col='white')
+points(26/225,69/230,lwd=1,col=2,pch=20)
+#points(12/171,36/177,lwd=6,col='white')
+points(12/171,36/177,lwd=1,col=2,pch=20)
+
+# hermes 
+logodds_c <- sim_trials_control_hermes
+logodds_t <- sim_trials_treatment_hermes
+
+
+SIGMA <- cov(cbind(logodds_c, logodds_t))
+MU <- c(mean(logodds_c), mean(logodds_t))
+# el <- ellipse( SIGMA , centre=MU , level=0.2)
+# lines(inv_logit(el) , col=col.alpha(4,0.3) , lwd=2 )
+# polygon( inv_logit(el) , col=col.alpha(4,0.2) , border=NA )
+el <- ellipse( SIGMA , centre=MU , level=0.3 )
+lines( inv_logit(el) , col=col.alpha(4,0.3) , lwd=2 )
+polygon( inv_logit(el) , col=col.alpha(4,0.2) , border=NA )
+el <- ellipse( SIGMA , centre=MU , level=0.89 )
+lines(inv_logit(el) , col=col.alpha(4,0.3) , lwd=2 )
+polygon(inv_logit(el) , col=col.alpha(4,0.2) , border=NA )
+
+points( mean(inv_logit(logodds_c)) , mean(inv_logit(logodds_t)), lwd=6 , col="white")
+points( mean(inv_logit(logodds_c)) , mean(inv_logit(logodds_t)) , lwd=3 , col=col.alpha(4,0.5))
+#points(43/146,89/164,lwd=6,col='white')
+points(43/146,89/164,lwd=1,col=4,pch=20)
+#points(14/34,25/35,lwd=6,col='white')
+points(14/34,25/35,lwd=1,col=4,pch=20)
+#points(52/265,77/233,lwd=6,col='white')
+points(52/265,77/233,lwd=1,col=4,pch=20)
+#points(29/103,45/103,lwd=6,col='white')
+points(29/103,45/103,lwd=1,col=4,pch=20)
+#points(33/94,59/97,lwd=6,col='white')
+points(33/94,59/97,lwd=1,col=4,pch=20)
+
+legend("bottomright", 
+       legend=c("Large","Small/Medium"), col=c(col.alpha(2,0.8), 
+     col.alpha(4,0.8)), pt.cex=2, pch=15,bty='n')
+```
+
+```{r probability scale}
+
+# Large core ------------
+
+# distribution of risk difference (RD), the absolute difference in probability between treatment and control
+lc_risk_difference <- inv_logit(sim_trials_treatment_large) -
+  inv_logit(sim_trials_control_large)
+
+# Hermes ------------------
+
+# distribution of risk difference (RD), the absolute difference in probability between treatment and control
+her_risk_difference <- inv_logit(sim_trials_treatment_hermes) -
+  inv_logit(sim_trials_control_hermes)
+```
+
+
+
+```{r posterior predictive probabilities}
+set.seed(734)
+
+# large core --------
+j_lc_pred_c <- rbinom(1e4,size=100,prob=inv_logit(sim_trials_control_large))
+j_lc_pred_t <- rbinom(1e4,100,prob=inv_logit(sim_trials_treatment_large))
+j_lc_pred_diff <- j_lc_pred_t - j_lc_pred_c
+
+# hermes -------------
+j_her_pred_c <- rbinom(1e4,size=100,prob=inv_logit(sim_trials_control_hermes))
+j_her_pred_t <- rbinom(1e4,100,prob=inv_logit(sim_trials_treatment_hermes))
+j_her_pred_diff <- j_her_pred_t - j_her_pred_c
+
+```
+
+```{r posterior predictive simulation, individual outcomes}
+
+# large core ----------
+plot(NULL,xlim=c(0,100),ylim=c(0,800),bty='n',
+     xlab='Number mRS 0-2 per 100 treated (10,000 simulations)',
+     ylab='Frequency')
+lines(table(j_lc_pred_c),lwd=3,col=col.alpha(2,0.4))
+lines(table(j_lc_pred_t),lwd=3, col=col.alpha(2,0.9))
+legend("topright", legend=c("Control","Treatment"), col=c(col.alpha(2,0.4), 
+     col.alpha(2,0.9)), pt.cex=2, pch=15,bty='n')
+mtext('Large strokes')
+
+# hermes ------ 
+plot(NULL,xlim=c(0,100),ylim=c(0,800),bty='n',
+     xlab='Number mRS 0-2 per 100 treated (10,000 simulations)',
+     ylab='Frequency')
+lines(table(j_her_pred_c),lwd=3,col=col.alpha(4,0.4))
+lines(table(j_her_pred_t),lwd=3, col=col.alpha(4,0.8))
+legend("topright", legend=c("Control","Treatment"), col=c(col.alpha(4,0.4), 
+     col.alpha(4,0.9)), pt.cex=2, pch=15,bty='n')
+mtext('Small/Medium strokes')
+```
+
+```{r figure 3c and 3d}
+
+# figure 3c -------------
+# posterior predictive simulation of absolute treatment effect 
+
+# large 
+t_pred_diff <- j_lc_pred_diff[j_lc_pred_diff>=0]
+c_pred_diff <- j_lc_pred_diff[j_lc_pred_diff<0]
+
+# hermes 
+t_her_pred_diff <- j_her_pred_diff[j_her_pred_diff>=0]
+c_her_pred_diff <- j_her_pred_diff[j_her_pred_diff<0]
+
+# plot
+
+plot(NULL,xlim=c(-20,60),ylim=c(0,450),bty='n',
+     xlab='Additional mRS 0-2 per 100 treated (10,000 simulations)',
+     ylab='Frequency')     
+lines(table(t_pred_diff),lwd=3,col=col.alpha(2,0.9))
+lines(table(c_pred_diff),lwd=3,col=col.alpha(2,0.4))
+lines(table(t_her_pred_diff),lwd=3,col=col.alpha(4,0.9))
+lines(table(c_her_pred_diff),lwd=3,col=col.alpha(4,0.4))
+legend("topright", 
+       legend=c('Large',"Small/Medium"), col=c(col.alpha(2,0.8), 
+     col.alpha(4,0.8)), pt.cex=2, pch=15,bty='n')
+
+# figure 3d ---------------
+# probabilities
+
+# calculations
+print('large')
+sum(j_lc_pred_diff>=1)/1e4
+sum(j_lc_pred_diff>=5)/1e4
+sum(j_lc_pred_diff>=10)/1e4
+sum(j_lc_pred_diff>=20)/1e4
+print('hermes')
+sum(j_her_pred_diff>=1)/1e4
+sum(j_her_pred_diff>=5)/1e4
+sum(j_her_pred_diff>=10)/1e4
+sum(j_her_pred_diff>=20)/1e4
+
+# figure
+# Define the x and y coordinates
+x_coords <- c(1, 5, 10, 20)
+y_coords_large <- c(sum(j_lc_pred_diff>=1)/1e4,
+                    sum(j_lc_pred_diff>=5)/1e4,
+                    sum(j_lc_pred_diff>=10)/1e4,
+                    sum(j_lc_pred_diff>=20)/1e4)
+y_coords_small <- c(sum(j_her_pred_diff>=1)/1e4,
+                    sum(j_her_pred_diff>=5)/1e4,
+                    sum(j_her_pred_diff>=10)/1e4,
+                    sum(j_her_pred_diff>=20)/1e4)
+
+# Plot the scatterplot without the default x-axis
+plot(NULL, xlim=c(0, 20), ylim=c(0, 1), xaxt="n", bty='n',
+     xlab='Additional mRS 0-2 per 100 treated (10,000 simulations)',
+     ylab='Probability')
+points(x_coords, y_coords_large,lwd=5,col=2,pch=19)
+points(x_coords,y_coords_small,lwd=5,col=4,pch=19)
+
+# Create a custom x-axis with the desired labels
+x_labels <- c(1, 5, 10, 20)
+axis(1, at=x_labels, labels=x_labels)
+
+# Connect the points with a line
+lines(x_coords, y_coords_large,lwd=3,lty=3,col=col.alpha(2,0.5))
+lines(x_coords, y_coords_small,lwd=3,lty=3,col=col.alpha(4,0.5))
+
+legend("topright", 
+       legend=c("Large","Small/Medium"), col=c(col.alpha(2,0.8), 
+     col.alpha(4,0.8)), pt.cex=2, pch=15,bty='n')
+
+```
+
+
+```{r Additional figure illustrating risk difference calculations}
+
+# calculations
+L <- list(lc_risk_difference, her_risk_difference, bao_risk_difference)
+S <- c('Large risk difference', "Small risk difference", 'Basilar risk difference')
+create_df(L,S)
+
+print('Large core')
+sum(lc_risk_difference>0.0)/1e4
+sum(lc_risk_difference>=.01)/1e4
+sum(lc_risk_difference>=0.05)/1e4
+sum(lc_risk_difference>=0.1)/1e4
+sum(lc_risk_difference>=0.2)/1e4
+
+print("Hermes")
+sum(her_risk_difference>0.0)/1e4
+sum(her_risk_difference>=.01)/1e4
+sum(her_risk_difference>=0.05)/1e4
+sum(her_risk_difference>=0.1)/1e4
+sum(her_risk_difference>=0.2)/1e4
+
+# figure
+# Large core --------------------
+dens(lc_risk_difference,xlim=c(-.2,.5),ylim=c(0,6),lwd=1,col=col.alpha(1),bty='n',
+     xlab='Difference in probability mRS 0-2 (treatment - control)')
+
+# fancy plot
+# shout out Richard Mcelreath 
+Wdens <- density(lc_risk_difference,adj=0.5)
+polygon(c(Wdens$x[Wdens$x>=0], max(Wdens$x), 0), c(Wdens$y[Wdens$x>=0], 0, 0), col=col.alpha(2,0.8), border = NA )
+polygon(c(Wdens$x[Wdens$x<0], 0, min(Wdens$x)), c(Wdens$y[Wdens$x<0], 0, 0), col=col.alpha(2,0.4), border = NA )
+legend("topright", 
+       legend=c("Large","Small/Medium"), col=c(col.alpha(2,0.8), 
+     col.alpha(4,0.8)), pt.cex=2, pch=15,bty='n')
+
+# Hermes 
+dens(her_risk_difference,col=col.alpha(1),add=TRUE)
+
+# fancy plot
+# shout out Richard Mcelreath 
+Wdens <- density(her_risk_difference,adj=0.5)
+polygon(c(Wdens$x[Wdens$x>=0], max(Wdens$x), 0), c(Wdens$y[Wdens$x>=0], 0, 0), col=col.alpha(4,0.8), border = NA )
+polygon(c(Wdens$x[Wdens$x<0], 0, min(Wdens$x)), c(Wdens$y[Wdens$x<0], 0, 0), col=col.alpha(4,0.4), border = NA )
+```
